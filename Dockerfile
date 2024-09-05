@@ -1,8 +1,8 @@
 FROM node:20
 
 # Install playwright
-COPY init.sh .
 RUN npx playwright install-deps
+RUN npx playwright install chromium
 
 WORKDIR /app
 COPY package.json package-lock.json .
