@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Timetable</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      .container {
+        max-width: 50rem;
+        min-height: 100vh;
+        margin: 0 auto;
+        padding: 2rem;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #current {
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin: 10px 0;
+      }
+
+      .minor {
+        font-size: 0.8em;
+        color: #666;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+        font-size: 0.8rem;
+        text-align: center;
+      }
+
+      table th:first-child,
+      table td:first-child {
+        width: 3rem;
+      }
+
+      table th:not(:first-child),
+      table td:not(:first-child) {
+        width: 100rem;
+      }
+
+      .spacer {
+        flex-grow: 1;
+      }
+
+      footer {
+        font-family: monospace;
+      }
+
+      footer a {
+        color: #888;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div id="status"></div>
+      <div
+        id="content"
+        style="white-space: pre-wrap; font-family: monospace"
+      ></div>
+      <div>
+        <button onclick="load(true)">불러오기</button>
+      </div>
+      <div class="spacer"></div>
+      <footer>
+        Managed by <a href="mailto:unknownpgr@gmail.com">unknownpgr</a>
+      </footer>
+    </div>
+  </body>
+  <script>
+    function getTimetableCache() {
+      try {
+        const timetable = localStorage.getItem("timetable");
+        return JSON.parse(timetable);
+      } catch {
+        return null;
+      }
+    }
+
+    function setTimetableCache(timetable) {
+      localStorage.setItem("timetable", JSON.stringify(timetable));
+    }
+
+    async function fetchTimetable(id, password) {
+      // Fetch timetable from server
+      const res = await fetch(`/api/timetable?id=${id}&password=${password}`);
+      const timetable = await res.json();
+
+      // Parse timetable
+      return timetable.result.map((course) => {
+        const parsed = course.subj_nm.trim().split("(");
+        const name = parsed[0].trim();
+        const place = parsed[1].slice(0, -1).trim();
+        const startHour = +course.bgng_hm.slice(0, 2);
+
+        return {
+          name,
+          place,
+          day: +course.day,
+          startHour,
+          startMinute: 0,
+          endHour: startHour,
+          endMinute: 50,
+        };
+      });
+    }
+
+    /**
+     * Receive login data (id, password) from user with a prompt
+     */
+    function getLoginInfo() {
+      const id = prompt("Enter your ID");
+      const password = prompt("Enter your password");
+      return { id, password };
+    }
+
+    function mergeAdjacentCourses(timetable) {
+      const mergedCourses = [];
+      let currentCourse = null;
+
+      // Sort courses by day and time
+      timetable.sort((a, b) => {
+        if (a.day !== b.day) {
+          return a.day - b.day;
+        }
+        return a.startHour - b.startHour;
+      });
+
+      for (const nextCourse of timetable) {
+        if (!currentCourse) {
+          currentCourse = nextCourse;
+        } else if (
+          nextCourse.day === currentCourse.day &&
+          nextCourse.startHour === currentCourse.endHour + 1
+        ) {
+          currentCourse = {
+            ...currentCourse,
+            endHour: nextCourse.endHour,
+          };
+        } else {
+          mergedCourses.push(currentCourse);
+          currentCourse = nextCourse;
+        }
+      }
+
+      if (currentCourse) {
+        mergedCourses.push(currentCourse);
+      }
+
+      return mergedCourses;
+    }
+
+    function createTimetableHTML(schedule) {
+      const days = ["월", "화", "수", "목", "금"];
+      const startHour = 9;
+      const endHour = 18;
+
+      // 9시부터 18시까지 시간표를 생성할 테이블
+      let timetable = Array.from({ length: endHour - startHour + 1 }, () =>
+        Array(5).fill(null)
+      );
+
+      // 수업을 테이블에 배치
+      schedule.forEach((subject) => {
+        const dayIndex = subject.day - 1; // day 1 ~ 5 to index 0 ~ 4
+        const startRow = subject.startHour - startHour;
+        const endRow = subject.endHour - startHour;
+        const rowSpan = endRow - startRow + 1;
+
+        timetable[startRow][dayIndex] = {
+          ...subject,
+          rowSpan: rowSpan,
+        };
+
+        // 나머지 시간에 대해서는 rowspan이 걸린 셀로 표시
+        for (let i = startRow + 1; i <= endRow; i++) {
+          timetable[i][dayIndex] = "rowspan";
+        }
+      });
+
+      // 테이블 HTML 생성
+      let html = '<table border="1">\n<thead>\n<tr>\n<th>시간</th>';
+      days.forEach((day) => {
+        html += `<th>${day}</th>`;
+      });
+      html += "</tr>\n</thead>\n<tbody>\n";
+
+      for (let hour = startHour; hour <= endHour; hour++) {
+        html += `<tr>\n<td>${hour}:00</td>\n`;
+        for (let day = 0; day < 5; day++) {
+          const cell = timetable[hour - startHour][day];
+          if (cell === null) {
+            html += "<td></td>\n";
+          } else if (cell !== "rowspan") {
+            html += `<td rowspan="${cell.rowSpan}">${cell.name}<br/><span class="minor">${cell.place}</span></td>\n`;
+          }
+        }
+        html += "</tr>\n";
+      }
+
+      html += "</tbody>\n</table>";
+      return html;
+    }
+
+    function displayTimetable(timetable) {
+      const mergedCourses = mergeAdjacentCourses(timetable);
+      const html = createTimetableHTML(mergedCourses);
+      document.getElementById("content").innerHTML = html;
+    }
+
+    function displayStatus(timetable) {
+      const today = new Date().getDay();
+      const todayCourses = timetable.filter((course) => course.day === today);
+      const now = new Date().getHours();
+      const remainingCourses = todayCourses.filter(
+        (course) => course.startHour >= now
+      );
+
+      let statusHTML = "";
+      if (remainingCourses.length === 0) {
+        statusHTML = "<div>(๑˃̵ᴗ˂̵)و No more classes today!</div>";
+      } else {
+        statusHTML = '<div id="current">';
+        if (remainingCourses[0].startHour == now) {
+          statusHTML += remainingCourses[0].name;
+          statusHTML += " @ " + remainingCourses[0].place;
+        } else {
+          statusHTML += "Break time";
+        }
+        statusHTML += "</div>";
+        if (remainingCourses.length > 1) {
+          const leftTime =
+            new Date().setHours(
+              remainingCourses[1].startHour,
+              remainingCourses[1].startMinute
+            ) - new Date();
+          statusHTML += '<div class="minor">';
+          statusHTML += "Next (" + Math.floor(leftTime / 60000) + " min):";
+          statusHTML += remainingCourses[1].name;
+          statusHTML += " @ " + remainingCourses[1].place;
+          statusHTML += "</div>";
+        }
+      }
+
+      document.getElementById("status").innerHTML = statusHTML;
+    }
+
+    async function load(ignoreCache = false) {
+      let timetable;
+      if (ignoreCache) {
+        const { id, password } = getLoginInfo();
+        const message = `
+          <h1>Timetable</h1>
+          <p>시간표를 불러오는 중입니다...(약 10초 소요)</p>
+        `;
+        document.getElementById("content").innerHTML = message;
+        timetable = await fetchTimetable(id, password);
+        setTimetableCache(timetable);
+      } else {
+        timetable = await getTimetableCache();
+        if (!timetable) {
+          const message = `
+            <h1>Timetable</h1>
+            <p>시간표를 불러오기 위해서는 아래 버튼을 눌러주세요. UOS Portal ID/PW가 필요합니다. 처음 한 번만 불러오면 이후에는 ID/PW를 입력할 필요가 없습니다.</p>
+            <p>로그인 정보는 백엔드/브라우저를 포함하여 어디에도 저장되지 않습니다. 로드된 시간표는 브라우저의 로컬 스토리지에 저장됩니다.</p>
+          `;
+          document.getElementById("content").innerHTML = message;
+        }
+      }
+      displayTimetable(timetable);
+      displayStatus(timetable);
+    }
+
+    load();
+  </script>
+</html>
