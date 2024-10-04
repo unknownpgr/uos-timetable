@@ -1,0 +1,13 @@
+version: "3"
+services:
+  timetable:
+    restart: always
+    build: .
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+networks:
+  default:
+    name: compose-main
+    external: true
